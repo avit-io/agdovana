@@ -1,0 +1,123 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Lavora nella directory corrente (il progetto del consumer).
+# Il consumer scrive solo Rules.agda — la CLI genera e compila l'entry point.
+
+RULES="Rules"     # modulo che esporta `allAlerts : List BurnRateAlert`
+GEN="AgdovanaGen" # file generato (gitignored)
+
+# Flag globali prima del comando
+while [[ $# -gt 0 && "$1" == --* ]]; do
+  case "$1" in
+    --rules) RULES="$2"; shift 2 ;;
+    --help|-h) set -- help; break ;;
+    *) break ;;
+  esac
+done
+
+CMD="${1:-help}"
+[[ $# -gt 0 ]] && shift || true
+
+# Scrive l'entry point che collega le regole del consumer al renderer.
+generate_entry() {
+  cat > "${GEN}.agda" <<AGDA
+module ${GEN} where
+
+open import IO         using (Main; run; putStr)
+open import SRE.Render using (renderAlerts)
+open import ${RULES}   using (allAlerts)
+
+main : Main
+main = run (putStr (renderAlerts allAlerts))
+AGDA
+}
+
+# Ricompila se: il binario non esiste, il modulo rules è cambiato,
+# o un qualsiasi file .agda è più recente del binario.
+needs_compile() {
+  [[ ! -f "./${GEN}" ]] && return 0
+  [[ ! -f "./${GEN}.agda" ]] && return 0
+  grep -q "open import ${RULES}" "${GEN}.agda" || return 0
+  find . -maxdepth 3 -name "*.agda" -newer "./${GEN}" | grep -q . && return 0
+  return 1
+}
+
+compile() {
+  generate_entry
+  echo "🔨 Compiling ${RULES}..." >&2
+  agda --compile "${GEN}.agda"
+}
+
+case "$CMD" in
+
+  cluck)
+    if needs_compile; then compile; fi
+    "./${GEN}"
+    ;;
+
+  preen)
+    # Typecheck diretto sul modulo delle regole: veloce, senza GHC.
+    echo "🐔 Typechecking ${RULES}..." >&2
+    agda "${RULES}.agda"
+    echo "✓ All proofs verified" >&2
+    ;;
+
+  watch)
+    echo "🐔 Watching .agda files (Ctrl-C to stop)..." >&2
+    watchexec --exts agda -- bash -c \
+      "agdovana --rules '${RULES}' cluck > prometheus-rules.yaml \
+       && echo '✓ Updated prometheus-rules.yaml'"
+    ;;
+
+  eggs)
+    slo="99.9"
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --slo) slo="$2"; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    awk -v slo="$slo" 'BEGIN {
+      budget_pct = 100 - slo
+      m30 = budget_pct / 100 * 30 * 24 * 60
+      m7  = budget_pct / 100 * 7  * 24 * 60
+      m1  = budget_pct / 100 * 1  * 24 * 60
+      printf "SLO target:    %s%%\n", slo
+      printf "Error budget:  %g%%\n", budget_pct
+      printf "  30 days:     %.1f min  (%.2f h)\n", m30, m30/60
+      printf "   7 days:     %.1f min  (%.2f h)\n", m7, m7/60
+      printf "   1 day:      %.1f min  (%.2f h)\n", m1, m1/60
+    }'
+    ;;
+
+  help|--help|-h|*)
+    cat <<'EOF'
+agdovana — formally verified Prometheus alerts
+
+Usage: agdovana [--rules MODULE] <command>
+
+Commands:
+  cluck              generate, compile and emit YAML to stdout
+  preen              typecheck proofs only (no compilation)
+  watch              recompile on .agda changes → prometheus-rules.yaml
+  eggs --slo <N.N>   show error budget breakdown
+
+Options:
+  --rules MODULE     module exporting `allAlerts : List BurnRateAlert`
+                     (default: Rules)
+
+Consumer workflow:
+  1. Write Rules.agda with open import SRE.Core / SRE.Proofs
+  2. agdovana preen            # verify proofs — fast
+  3. agdovana cluck > rules.yaml
+
+Examples:
+  agdovana cluck > prometheus-rules.yaml
+  agdovana --rules MyCompany.SreAlerts cluck
+  agdovana preen
+  agdovana eggs --slo 99.9
+EOF
+    ;;
+
+esac

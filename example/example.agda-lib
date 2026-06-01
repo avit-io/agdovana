@@ -1,0 +1,3 @@
+name: agdovana-example
+include: .
+depend: standard-library agdovana

@@ -1,0 +1,15 @@
+# Agda build artefacts
+*.agdai
+MAlonzo/
+_build/
+
+# Generated entry point and binary (created by `agdovana cluck`)
+AgdovanaGen.agda
+AgdovanaGen
+
+# GHC object files left by agda --compile
+*.hi
+*.o
+
+# Generated output
+prometheus-rules.yaml
