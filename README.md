@@ -1,4 +1,8 @@
-# Agdovana 🐔
+# Agdovana
+
+<p align="center">
+  <img src="logo.svg" width="160" alt="Agdovana — la gallina Padovana con la cresta di Π, Σ e λ"/>
+</p>
 
 > *La gallina che chioccia solo quando ha una prova.*
 
